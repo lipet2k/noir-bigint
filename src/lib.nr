@@ -1,21 +1,19 @@
 use dep::std::println;
 
 mod utils;
-mod prime_field;
-mod examples;
 
 // BUG: Noir doesn't automatically add `comptime` to all globals, hence strongly typed
 // Number of bits per limb.
 global BITS_PER_LIMB: comptime Field = 56;
 // Number of limbs.
-global NUM_LIMBS: comptime Field = 5;
+global NUM_LIMBS: comptime Field = 10;
 // Noir doesn't support expressions on globals so these are hardcoded
 // Number of bytes per limb.
 global BYTES_PER_LIMB: comptime Field = 7; // BITS_PER_LIMB / 8
 // Maximum number of bits.
-global MAX_BITS: comptime Field = 280; // BITS_PER_LIMB * NUM_LIMBS
+global MAX_BITS: comptime Field = 560; // BITS_PER_LIMB * NUM_LIMBS
 // Maximum number of bytes.
-global MAX_BYTES: comptime Field = 35; // NUM_LIMBS * BYTES_PER_LIMB
+global MAX_BYTES: comptime Field = 70; // NUM_LIMBS * BYTES_PER_LIMB
 
 // BigUint56 represents a large unsigned integer using a fixed number of limbs, each of which is a 56-bit unsigned integer.
 // We use u56 limbs because 
@@ -163,6 +161,36 @@ impl BigUint56 {
             };
 
             hi.limbs[i] = carry;
+        };
+
+        (lo, hi)
+    }
+
+    // Performs the multiplication operation for a BigUint56 and a u56.
+    // Implements the long multiplication algorithm.
+    // Returns the low and high parts of the result.
+    fn mul_u56(self: Self, other: u56) -> (Self, u56) {
+        let mut lo = BigUint56::zero();
+        let mut hi : u56 = 0;
+
+        for i in 0..NUM_LIMBS {
+            let mut carry = 0 as u56;
+
+            for j in 0..NUM_LIMBS {
+                let k = i + j;
+
+                if k as u56 >= NUM_LIMBS as u56 {
+                    let (n, c) = utils::mac(hi, self.limbs[i], other, carry);
+                    hi = n;
+                    carry = c;
+                } else {
+                    let (n, c) = utils::mac(lo.limbs[k], self.limbs[i], other, carry);
+                    lo.limbs[k] = n;
+                    carry = c;
+                }
+            };
+
+            hi = carry;
         };
 
         (lo, hi)
@@ -363,9 +391,20 @@ impl BigUint56 {
         }
     }
     
-    // Returns self * other % modulus.
-    // TODO: Implement
-    // fn mul_mod(self: Self, other: Self, modulus: Self)
+    // Returns self * other (u56) % modulus.
+    fn mul_mod_u56(self: Self, other: u56, modulus: Self) -> Self {
+        let (lo, hi) = self.mul_u56(other);
+
+        let (prod, borrow1) = lo.sbb(modulus);
+        let (_diff, borrow2) = utils::sbb(hi, 0 as u56, borrow1);
+
+        if borrow2 == 0 {
+            prod
+        } else {
+            prod.add(modulus)
+        }
+
+    }
 
     // Print as bytes
     fn println(self: Self) {
@@ -378,21 +417,21 @@ impl BigUint56 {
 fn test_from_bytes1() {
     let bytes = [2 as u8];
     let a = BigUint56::from_bytes(bytes);
-    assert(a.eq(BigUint56{ limbs: [2, 0, 0, 0, 0] }));
+    assert(a.eq(BigUint56{ limbs: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0] }));
 }
 
 #[test]
 fn test_from_bytes2() {
     let bytes = [255 as u8; 7];
     let a = BigUint56::from_bytes(bytes);
-    assert(a.eq(BigUint56{ limbs: [-1 as u56, 0, 0, 0, 0] }));
+    assert(a.eq(BigUint56{ limbs: [-1 as u56, 0, 0, 0, 0, 0, 0, 0, 0, 0] }));
 }
 
 #[test]
 fn test_from_bytes3() {
     let bytes = [255 as u8; 8];
     let a = BigUint56::from_bytes(bytes);
-    assert(a.eq(BigUint56{ limbs: [-1 as u56, 255, 0, 0, 0] }));
+    assert(a.eq(BigUint56{ limbs: [-1 as u56, 255, 0, 0, 0, 0, 0, 0, 0, 0] }));
 }
 
 #[test]
@@ -424,11 +463,11 @@ fn test_add1() {
 
 #[test]
 fn test_add2() {
-    let a = BigUint56{ limbs: [-1 as u56, -1 as u56, -1 as u56, -1 as u56, 0] };
-    let b = BigUint56{ limbs: [1, 0, 0, 0, 0] };
+    let a = BigUint56{ limbs: [-1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, 0] };
+    let b = BigUint56{ limbs: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     let sum = a.add(b);
 
-    assert(sum.eq(BigUint56{ limbs: [0, 0, 0, 0, 1] }));
+    assert(sum.eq(BigUint56{ limbs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1] }));
 }
 
 #[test]
@@ -452,20 +491,20 @@ fn test_sub1() {
 
 #[test]
 fn test_sub2() {
-    let a = BigUint56{ limbs: [1, 2, 0, 0, 0] };
-    let b = BigUint56{ limbs: [2, 0, 0, 0, 0] };
+    let a = BigUint56{ limbs: [1, 2, 0, 0, 0, 0, 0, 0, 0, 0] };
+    let b = BigUint56{ limbs: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     let diff = a.sub(b);
 
-    assert(diff.eq(BigUint56{ limbs: [-1 as u56, 1, 0, 0, 0] }));
+    assert(diff.eq(BigUint56{ limbs: [-1 as u56, 1, 0, 0, 0, 0, 0, 0, 0, 0] }));
 }
 
 #[test]
 fn test_sbb1() {
-    let a = BigUint56{ limbs: [1, 0, 0, 0, 0] };
-    let b = BigUint56{ limbs: [2, 0, 0, 0, 0] };
+    let a = BigUint56{ limbs: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
+    let b = BigUint56{ limbs: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     let (diff, borrow) = a.sbb(b);
 
-    assert(diff.eq(BigUint56{ limbs: [-1 as u56; 5] }));
+    assert(diff.eq(BigUint56{ limbs: [-1 as u56; 10] }));
     assert(borrow >> (BITS_PER_LIMB as u56 - 1) == 1);
 }
 
@@ -481,12 +520,12 @@ fn test_mul1() {
 
 #[test]
 fn test_mul2() {
-    let a = BigUint56{ limbs: [-1 as u56; 5] };
-    let b = BigUint56{ limbs: [-1 as u56; 5] };
+    let a = BigUint56{ limbs: [-1 as u56; 10] };
+    let b = BigUint56{ limbs: [-1 as u56; 10] };
     let (lo, hi) = a.mul(b);
 
     assert(lo.eq(BigUint56::one()));
-    assert(hi.eq(BigUint56{ limbs: [-2 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56] }));
+    assert(hi.eq(BigUint56{ limbs: [-2 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56] }));
 }
 
 #[test]
@@ -657,13 +696,13 @@ fn test_div2() {
 
 #[test]
 fn test_div3() {
-    let a = BigUint56{ limbs: [2, 0, 1, 0, 0] };
-    let b = BigUint56{ limbs: [0, 1, 0, 0, 0] };
+    let a = BigUint56{ limbs: [2, 0, 1, 0, 0, 0, 0, 0, 0, 0] };
+    let b = BigUint56{ limbs: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0] };
 
     let (q, r) = a.div(b);
 
-    assert(q.eq(BigUint56{ limbs: [0, 1, 0, 0, 0] }));
-    assert(r.eq(BigUint56{ limbs: [2, 0, 0, 0, 0] }));
+    assert(q.eq(BigUint56{ limbs: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0] }));
+    assert(r.eq(BigUint56{ limbs: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0] }));
 }
 
 #[test]
