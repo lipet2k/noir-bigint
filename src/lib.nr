@@ -169,31 +169,18 @@ impl BigUint56 {
     // Performs the multiplication operation for a BigUint56 and a u56.
     // Implements the long multiplication algorithm.
     // Returns the low and high parts of the result.
-    fn mul_u56(self: Self, other: u56) -> (Self, u56) {
+    fn mulc(self: Self, other: u56) -> (Self, u56) {
         let mut lo = BigUint56::zero();
-        let mut hi : u56 = 0;
+
+        let mut carry = 0 as u56;
 
         for i in 0..NUM_LIMBS {
-            let mut carry = 0 as u56;
-
-            for j in 0..NUM_LIMBS {
-                let k = i + j;
-
-                if k as u56 >= NUM_LIMBS as u56 {
-                    let (n, c) = utils::mac(hi, self.limbs[i], other, carry);
-                    hi = n;
-                    carry = c;
-                } else {
-                    let (n, c) = utils::mac(lo.limbs[k], self.limbs[i], other, carry);
-                    lo.limbs[k] = n;
-                    carry = c;
-                }
-            };
-
-            hi = carry;
+            let (n, c) = utils::mac(0 as u56, self.limbs[i], other, carry);
+            lo.limbs[i] = n;
+            carry = c;
         };
 
-        (lo, hi)
+        (lo, carry)
     }
 
     // Performs left shift operation by `n` bits.
@@ -392,16 +379,16 @@ impl BigUint56 {
     }
     
     // Returns self * other (u56) % modulus.
-    fn mul_mod_u56(self: Self, other: u56, modulus: Self) -> Self {
-        let (lo, hi) = self.mul_u56(other);
+    fn mulc_mod(self: Self, other: u56, modulus: Self) -> Self {
+        let (prod1, carry) = self.mulc(other);
 
-        let (prod, borrow1) = lo.sbb(modulus);
-        let (_diff, borrow2) = utils::sbb(hi, 0 as u56, borrow1);
+        let (prod2, borrow1) = prod1.sbb(modulus);
+        let (_diff, borrow2) = utils::sbb(carry, 0 as u56, borrow1);
 
         if borrow2 == 0 {
-            prod
+            prod2
         } else {
-            prod.add(modulus)
+            prod2.add(modulus)
         }
 
     }
@@ -526,6 +513,53 @@ fn test_mul2() {
 
     assert(lo.eq(BigUint56::one()));
     assert(hi.eq(BigUint56{ limbs: [-2 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56] }));
+}
+
+#[test]
+fn test_mulc_1() {
+    let a = BigUint56::from_bytes([2]);
+    let b = 3;
+
+    let (lo, hi) = a.mulc(b);
+    assert(lo.eq(BigUint56::from_bytes([6])));
+    assert(hi == 0);
+}
+
+#[test]
+fn test_mulc_2() {
+    let a = BigUint56{ limbs: [-1 as u56; 10] };
+    let b = -1 as u56;
+    let (lo, hi) = a.mulc(b);
+
+    assert(lo.eq(BigUint56{ limbs: [1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56] }));
+    assert(hi == -2 as u56);
+}
+
+#[test]
+fn test_mulc_3() {
+    let a = BigUint56{ limbs: [-1 as u56; 10] };
+    let b = 0 as u56;
+    let (lo, hi) = a.mulc(b);
+    assert(lo.is_zero());
+    assert(hi == 0);
+}
+
+#[test]
+fn test_mulc_4() {
+    let a = BigUint56{ limbs: [-1 as u56; 10] };
+    let b = 1 as u56;
+    let (lo, hi) = a.mulc(b);
+    assert(lo.eq(BigUint56{ limbs: [-1 as u56; 10] }));
+    assert(hi == 0);
+}
+
+#[test]
+fn test_mulc_5() {
+    let a = BigUint56{ limbs: [-1 as u56; 10] };
+    let b = 2 as u56;
+    let (lo, hi) = a.mulc(b);
+    assert(lo.eq(BigUint56{ limbs: [-2 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56, -1 as u56] }));
+    assert(hi == 1);
 }
 
 #[test]
